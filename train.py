@@ -801,3 +801,27 @@ print(f"num_params_M:     {num_params / 1e6:.1f}")
 print(f"depth:            {DEPTH}")
 print(f"crystal_pct:      {crystal_agg}")
 print(f"crystal_ordering: {crystal_ordering}")
+
+# Report results to webhook (if configured)
+WEBHOOK_URL = os.environ.get("CRYSTAL_WEBHOOK", "")
+if WEBHOOK_URL:
+    try:
+        import urllib.request
+        payload = json.dumps({
+            "val_bpb": round(val_bpb, 6),
+            "crystal_pct": crystal_agg,
+            "crystal_ordering": crystal_ordering,
+            "per_layer": crystal_per_layer,
+            "num_steps": step,
+            "num_params_M": round(num_params / 1e6, 1),
+            "depth": DEPTH,
+            "peak_vram_mb": round(peak_vram_mb, 1),
+            "training_seconds": round(total_training_time, 1),
+        }).encode()
+        req = urllib.request.Request(
+            WEBHOOK_URL, data=payload,
+            headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        print(f"(webhook failed: {e})")
