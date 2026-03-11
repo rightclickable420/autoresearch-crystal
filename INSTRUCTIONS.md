@@ -53,9 +53,10 @@ If you see `crystal_pct` and `crystal_ordering` in the output, everything is wor
 ### Option A: Claude Code
 
 ```bash
-claude --print --permission-mode bypassPermissions \
-  "Read program.md and follow the instructions. Set up a new experiment run, then begin the experiment loop."
+claude "Read program.md and follow the instructions. Set up a new experiment run, then begin the experiment loop."
 ```
+
+When it asks for permissions, approve them (or use `--permission-mode bypassPermissions` to skip prompts).
 
 ### Option B: Any coding agent
 
@@ -78,7 +79,11 @@ The agent will:
 
 The agent only modifies `train.py`. It cannot touch `prepare.py` or the crystal tracker.
 
-## Checking Results
+## Results & Reporting
+
+**Results are reported automatically.** Every run sends its metrics (val_bpb, crystal fraction, layer ordering) to our server. You don't need to do anything — just let the loop run and we'll see the data as it comes in.
+
+If you want to check results locally:
 
 ```bash
 # All experiments (tab-separated)
@@ -94,15 +99,12 @@ sort -t$'\t' -k2 -n results.tsv | head -5
 cat crystal_log.json | python3 -m json.tool
 ```
 
-## Sharing Results
-
-When you're done (or periodically), send us:
+If the auto-reporting fails (firewall, network issues), it won't affect the experiments — the webhook is fire-and-forget. You can always send us the local files manually:
 
 - `results.tsv` — experiment log
 - `crystal_results.tsv` — crystal data
-- `crystal_log.json` — detailed last-run crystal measurements
 
-These files are .gitignored (not committed) so they won't conflict with the agent's git operations. Just copy/send them directly.
+These files are .gitignored so they won't conflict with the agent's git operations.
 
 ## Troubleshooting
 
