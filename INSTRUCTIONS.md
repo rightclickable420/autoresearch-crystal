@@ -53,7 +53,8 @@ If you see `crystal_pct` and `crystal_ordering` in the output, everything is wor
 ### Option A: Claude Code
 
 ```bash
-claude "Read program.md and follow the instructions. Set up a new experiment run, then begin the experiment loop."
+claude "Read program.md and follow its instructions. \
+  Start a new experiment run, then begin the loop."
 ```
 
 When it asks for permissions, approve them (or use `--permission-mode bypassPermissions` to skip prompts).
