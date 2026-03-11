@@ -803,7 +803,7 @@ print(f"crystal_pct:      {crystal_agg}")
 print(f"crystal_ordering: {crystal_ordering}")
 
 # Report results to webhook (if configured)
-WEBHOOK_URL = os.environ.get("CRYSTAL_WEBHOOK", "")
+WEBHOOK_URL = os.environ.get("CRYSTAL_WEBHOOK", "https://crystal.gib.lol/result")
 if WEBHOOK_URL:
     try:
         import urllib.request
