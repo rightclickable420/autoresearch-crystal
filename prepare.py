@@ -35,9 +35,10 @@ EVAL_TOKENS = 40 * 524288  # number of tokens for val eval
 # Configuration
 # ---------------------------------------------------------------------------
 
+DATASET = os.environ.get("AUTORESEARCH_DATASET", "fineweb")
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch")
-DATA_DIR = os.path.join(CACHE_DIR, "data")
-TOKENIZER_DIR = os.path.join(CACHE_DIR, "tokenizer")
+DATA_DIR = os.path.join(CACHE_DIR, "data", DATASET)
+TOKENIZER_DIR = os.path.join(CACHE_DIR, "tokenizer", DATASET)
 BASE_URL = "https://huggingface.co/datasets/karpathy/climbmix-400b-shuffle/resolve/main"
 MAX_SHARD = 6542 # the last datashard is shard_06542.parquet
 VAL_SHARD = MAX_SHARD  # pinned validation shard (shard_06542)
@@ -51,7 +52,96 @@ SPECIAL_TOKENS = [f"<|reserved_{i}|>" for i in range(4)]
 BOS_TOKEN = "<|reserved_0|>"
 
 # ---------------------------------------------------------------------------
-# Data download
+# Alternative dataset preparation (Shakespeare, Python)
+# ---------------------------------------------------------------------------
+
+SHAKESPEARE_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+CHUNK_SIZE_CHARS = 2000  # Split text into ~2000 char documents for parquet format
+
+
+def _text_to_parquet_shards(texts: list[str], shard_size: int = 500):
+    """Write list of text documents as parquet shards in DATA_DIR."""
+    import pyarrow as pa
+    os.makedirs(DATA_DIR, exist_ok=True)
+    for i in range(0, len(texts), shard_size):
+        chunk = texts[i:i + shard_size]
+        table = pa.table({"text": chunk})
+        shard_idx = i // shard_size
+        path = os.path.join(DATA_DIR, f"shard_{shard_idx:05d}.parquet")
+        pq.write_table(table, path)
+    print(f"  Wrote {len(texts)} documents in {(len(texts) + shard_size - 1) // shard_size} shards")
+
+
+def prepare_shakespeare():
+    """Download tiny Shakespeare and write as parquet shards."""
+    check = os.path.join(DATA_DIR, "shard_00000.parquet")
+    if os.path.exists(check):
+        print(f"Shakespeare: already prepared at {DATA_DIR}")
+        return
+
+    print("Shakespeare: downloading...")
+    resp = requests.get(SHAKESPEARE_URL, timeout=30)
+    resp.raise_for_status()
+    text = resp.text
+    print(f"  {len(text):,} characters")
+
+    # Split into chunks as "documents"
+    docs = [text[i:i + CHUNK_SIZE_CHARS] for i in range(0, len(text), CHUNK_SIZE_CHARS)]
+    # Last 10% for validation
+    split = int(len(docs) * 0.9)
+    train_docs = docs[:split]
+    val_docs = docs[split:]
+
+    _text_to_parquet_shards(train_docs + val_docs)
+    # Write val shard index so we know which is validation
+    with open(os.path.join(DATA_DIR, "val_shard.txt"), "w") as f:
+        f.write(f"shard_{len(train_docs) // 500:05d}.parquet\n")
+    print(f"  Train: {len(train_docs)} docs, Val: {len(val_docs)} docs")
+
+
+def prepare_python():
+    """Collect Python stdlib source files and write as parquet shards."""
+    check = os.path.join(DATA_DIR, "shard_00000.parquet")
+    if os.path.exists(check):
+        print(f"Python stdlib: already prepared at {DATA_DIR}")
+        return
+
+    import sysconfig
+    stdlib_path = sysconfig.get_paths()["stdlib"]
+    print(f"Python stdlib: collecting from {stdlib_path}...")
+
+    docs = []
+    for root, dirs, files in os.walk(stdlib_path):
+        for fname in files:
+            if fname.endswith(".py"):
+                try:
+                    path = os.path.join(root, fname)
+                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                    if len(content) > 100:  # skip tiny files
+                        # Split large files into chunks
+                        for i in range(0, len(content), CHUNK_SIZE_CHARS):
+                            docs.append(content[i:i + CHUNK_SIZE_CHARS])
+                except Exception:
+                    continue
+
+    print(f"  {len(docs)} document chunks from stdlib")
+    if len(docs) < 20:
+        print("  WARNING: Very few documents. Results may be noisy.")
+
+    # Last 10% for validation
+    split = int(len(docs) * 0.9)
+    train_docs = docs[:split]
+    val_docs = docs[split:]
+
+    _text_to_parquet_shards(train_docs + val_docs)
+    with open(os.path.join(DATA_DIR, "val_shard.txt"), "w") as f:
+        f.write(f"shard_{len(train_docs) // 500:05d}.parquet\n")
+    print(f"  Train: {len(train_docs)} docs, Val: {len(val_docs)} docs")
+
+
+# ---------------------------------------------------------------------------
+# Data download (FineWeb)
 # ---------------------------------------------------------------------------
 
 def download_single_shard(index):
@@ -251,11 +341,21 @@ def get_token_bytes(device="cpu"):
         return torch.load(f, map_location=device)
 
 
+def _get_val_filename():
+    """Get validation shard filename, handling both FineWeb (fixed) and alternative datasets."""
+    custom_val = os.path.join(DATA_DIR, "val_shard.txt")
+    if os.path.exists(custom_val):
+        with open(custom_val) as f:
+            return f.read().strip()
+    return VAL_FILENAME
+
+
 def _document_batches(split, tokenizer_batch_size=128):
     """Infinite iterator over document batches from parquet files."""
     parquet_paths = list_parquet_files()
     assert len(parquet_paths) > 0, "No parquet files found. Run prepare.py first."
-    val_path = os.path.join(DATA_DIR, VAL_FILENAME)
+    val_filename = _get_val_filename()
+    val_path = os.path.join(DATA_DIR, val_filename)
     if split == "train":
         parquet_paths = [p for p in parquet_paths if p != val_path]
     else:
@@ -369,20 +469,41 @@ def evaluate_bpb(model, tokenizer, batch_size):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepare data and tokenizer for autoresearch")
-    parser.add_argument("--num-shards", type=int, default=10, help="Number of training shards to download (-1 = all). Val shard is always pinned.")
+    parser.add_argument("--dataset", type=str, default="fineweb", choices=["fineweb", "shakespeare", "python"],
+                        help="Dataset to prepare: fineweb (default), shakespeare, or python")
+    parser.add_argument("--num-shards", type=int, default=10, help="Number of FineWeb training shards (-1 = all)")
     parser.add_argument("--download-workers", type=int, default=8, help="Number of parallel download workers")
     args = parser.parse_args()
 
-    num_shards = MAX_SHARD if args.num_shards == -1 else args.num_shards
+    # Override global DATASET and paths
+    DATASET = args.dataset
+    os.environ["AUTORESEARCH_DATASET"] = DATASET
+    DATA_DIR_LOCAL = os.path.join(CACHE_DIR, "data", DATASET)
+    TOKENIZER_DIR_LOCAL = os.path.join(CACHE_DIR, "tokenizer", DATASET)
 
+    # Patch module-level vars (needed for functions that reference them)
+    import prepare
+    prepare.DATA_DIR = DATA_DIR_LOCAL
+    prepare.TOKENIZER_DIR = TOKENIZER_DIR_LOCAL
+    globals()["DATA_DIR"] = DATA_DIR_LOCAL
+    globals()["TOKENIZER_DIR"] = TOKENIZER_DIR_LOCAL
+
+    print(f"Dataset: {DATASET}")
     print(f"Cache directory: {CACHE_DIR}")
     print()
 
-    # Step 1: Download data
-    download_data(num_shards, download_workers=args.download_workers)
+    # Step 1: Prepare data
+    if DATASET == "fineweb":
+        num_shards = MAX_SHARD if args.num_shards == -1 else args.num_shards
+        download_data(num_shards, download_workers=args.download_workers)
+    elif DATASET == "shakespeare":
+        prepare_shakespeare()
+    elif DATASET == "python":
+        prepare_python()
     print()
 
     # Step 2: Train tokenizer
     train_tokenizer()
     print()
-    print("Done! Ready to train.")
+    print(f"Done! Ready to train with {DATASET}.")
+    print(f"Run: AUTORESEARCH_DATASET={DATASET} uv run train.py")

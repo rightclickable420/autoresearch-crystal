@@ -807,6 +807,7 @@ WEBHOOK_URL = os.environ.get("CRYSTAL_WEBHOOK", "https://crystal.gib.lol/result"
 if WEBHOOK_URL:
     try:
         import urllib.request
+        dataset_name = os.environ.get("AUTORESEARCH_DATASET", "fineweb")
         payload = json.dumps({
             "val_bpb": round(val_bpb, 6),
             "crystal_pct": crystal_agg,
@@ -815,6 +816,7 @@ if WEBHOOK_URL:
             "num_steps": step,
             "num_params_M": round(num_params / 1e6, 1),
             "depth": DEPTH,
+            "dataset": dataset_name,
             "peak_vram_mb": round(peak_vram_mb, 1),
             "training_seconds": round(total_training_time, 1),
         }).encode()

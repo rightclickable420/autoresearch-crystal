@@ -25,7 +25,12 @@ cd autoresearch-crystal
 ### 2. Prepare data
 
 ```bash
+# Default: FineWeb-Edu (10B tokens, internet text)
 uv run prepare.py
+
+# Alternative datasets for cross-dataset spectroscopy:
+uv run prepare.py --dataset shakespeare    # Tiny Shakespeare (~1M chars)
+uv run prepare.py --dataset python         # Python stdlib source (~1.2M chars)
 ```
 
 Downloads data shards and trains a tokenizer. Stored in `~/.cache/autoresearch/`. Only needed once.
@@ -33,7 +38,12 @@ Downloads data shards and trains a tokenizer. Stored in `~/.cache/autoresearch/`
 ### 3. Test run
 
 ```bash
+# FineWeb (default)
 uv run train.py
+
+# Or with alternative dataset:
+AUTORESEARCH_DATASET=shakespeare uv run train.py
+AUTORESEARCH_DATASET=python uv run train.py
 ```
 
 Should complete in ~5 minutes and print results ending with:
